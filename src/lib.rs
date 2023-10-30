@@ -7,41 +7,40 @@ use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
 use toml::{Table, Value};
+use crate::source::Source;
+use crate::utils::build_toml_value;
+
+
+mod source;
+
+pub mod utils;
 
 pub struct ConfigLoader {
-    file_base_name: String,
-    environment_prefix: String,
+    sources: Vec<Box<dyn Source + Send + Sync>>
 }
 
 impl ConfigLoader {
-    pub fn new(file_base_name: impl Into<String>, environment_prefix: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         ConfigLoader {
-            file_base_name: file_base_name.into(),
-            environment_prefix: environment_prefix.into(),
+            sources: vec![]
         }
+    }
+    pub fn add_source<T: Source  + Send + Sync + 'static>(&mut self, source: T) {
+        self.sources.push(Box::new(source))
     }
 
     pub fn construct<'de, T: Deserialize<'de>>(self) -> Result<T, Box<dyn std::error::Error>> {
-        // load from file
-        let profile: Option<String> = None;
-        let profile_string = profile
-            .map(|it| format!("_{}", it))
-            .unwrap_or("".to_string());
-        let buf = PathBuf::from_str(&format!("{}{}.toml", &self.file_base_name, profile_string))?;
-        let file_content = std::fs::read_to_string(buf)?;
-        let mut result: toml::Value = toml::from_str(&file_content)?;
 
-        // load from env
-        let prefix = format!("{}_", &self.environment_prefix);
-        let environments: Vec<Value> = std::env::vars()
-            .filter(|(key, _)| key.starts_with(&prefix))
-            .map(|(key, value)| (key.strip_prefix(&prefix).unwrap_or(&key).to_owned(), value))
-            .filter(|(key, _)| !key.is_empty())
-            .map(|(key, value)| build_toml_value(key.to_lowercase(), value))
-            .collect();
+        let mut source_ret = vec![];
+        for source in self.sources {
+            let value1 = source.load()?;
+            source_ret.push(value1);
+        }
+
+        let mut result = Value::Table(Table::new());
 
         // merge all values
-        for environment_value in environments {
+        for environment_value in source_ret {
             result = merge_two_value(result, environment_value, "$")?;
         }
 
@@ -156,21 +155,6 @@ fn collect_path_placeholder(root: &Value, value: &Value, collectors: &mut HashMa
     }
 }
 
-fn build_toml_value(key: String, value: String) -> toml::Value {
-    let split = key.split('_').collect_vec();
-
-    let mut rev = split.into_iter().rev();
-    let first = rev.next().unwrap();
-    let value1 = Value::String(value.to_owned());
-    let mut accr = Table::new();
-    accr.insert(first.to_owned(), value1);
-    let accr = Value::Table(accr);
-    rev.fold(accr, |accr, text| {
-        let mut map = Table::new();
-        map.insert(text.to_owned(), accr);
-        Value::Table(map)
-    })
-}
 
 #[derive(Debug, PartialEq)]
 pub struct Error {
@@ -254,6 +238,8 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::ConfigLoader;
+    use crate::source::environment::EnvironmentSource;
+    use crate::source::file_based::FileSource;
 
     #[test]
     fn should_load_config_from_toml_file() {
@@ -263,12 +249,13 @@ mod tests {
         }
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("application.toml");
-        let mut tmp_file = File::create(file_path).unwrap();
+        let mut tmp_file = File::create(&file_path).unwrap();
         writeln!(tmp_file, "a = 123").unwrap();
 
-        let buf = dir.path().join("application").to_str().unwrap().to_string();
-        let config_loader = ConfigLoader::new(buf, "APP");
-        let config: Config = config_loader.construct().unwrap();
+        let mut loader = ConfigLoader::new();
+        loader.add_source(FileSource::new(file_path));
+
+        let config: Config = loader.construct().unwrap();
 
         assert_eq!(123, config.a)
     }
@@ -283,12 +270,15 @@ mod tests {
         temp_env::with_var("APP_VALUE", Some("value here"), || {
             let dir = tempdir().unwrap();
             let file_path = dir.path().join("application.toml");
-            let mut tmp_file = File::create(file_path).unwrap();
+            let mut tmp_file = File::create(&file_path).unwrap();
             writeln!(tmp_file, "a = 123").unwrap();
 
-            let buf = dir.path().join("application").to_str().unwrap().to_string();
-            let config_loader = ConfigLoader::new(buf, "APP");
-            let config: Config = config_loader.construct().unwrap();
+
+            let mut loader = ConfigLoader::new();
+            loader.add_source(FileSource::new(file_path));
+            loader.add_source(EnvironmentSource::new("APP"));
+
+            let config: Config = loader.construct().unwrap();
 
             assert_eq!("value here", config.value);
         });
@@ -304,12 +294,14 @@ mod tests {
         temp_env::with_var("YAAC_VALUE", Some("value here"), || {
             let dir = tempdir().unwrap();
             let file_path = dir.path().join("application.toml");
-            let mut tmp_file = File::create(file_path).unwrap();
+            let mut tmp_file = File::create(&file_path).unwrap();
             writeln!(tmp_file, "a = 123").unwrap();
 
-            let buf = dir.path().join("application").to_str().unwrap().to_string();
-            let config_loader = ConfigLoader::new(buf, "YAAC");
-            let config: Config = config_loader.construct().unwrap();
+            let mut loader = ConfigLoader::new();
+            loader.add_source(FileSource::new(file_path));
+            loader.add_source(EnvironmentSource::new("YAAC"));
+
+            let config: Config = loader.construct().unwrap();
 
             assert_eq!("value here", config.value);
         });
@@ -325,13 +317,14 @@ mod tests {
         temp_env::with_var("YAAC_VALUE", Some("value here"), || {
             let dir = tempdir().unwrap();
             let file_path = dir.path().join("application.toml");
-            let mut tmp_file = File::create(file_path).unwrap();
+            let mut tmp_file = File::create(&file_path).unwrap();
             writeln!(tmp_file, "value = \"original\"").unwrap();
 
-            let buf = dir.path().join("application").to_str().unwrap().to_string();
-            let config_loader = ConfigLoader::new(buf, "YAAC");
-            let config: Config = config_loader.construct().unwrap();
+            let mut loader = ConfigLoader::new();
+            loader.add_source(FileSource::new(file_path));
+            loader.add_source(EnvironmentSource::new("YAAC"));
 
+            let config: Config = loader.construct().unwrap();
             assert_eq!("value here", config.value);
         });
     }
@@ -346,17 +339,19 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("application.toml");
-        let mut tmp_file = File::create(file_path).unwrap();
+        let mut tmp_file = File::create(&file_path).unwrap();
         writeln!(
             tmp_file,
             "hello_key = \"hello\" \nall=\"${{hello_key}} world\""
         )
         .unwrap();
 
-        let buf = dir.path().join("application").to_str().unwrap().to_string();
-        let config_loader = ConfigLoader::new(buf, "APP");
-        let config: Config = config_loader.construct().unwrap();
 
+        let mut loader = ConfigLoader::new();
+        loader.add_source(FileSource::new(file_path));
+        loader.add_source(EnvironmentSource::new("APP"));
+
+        let config: Config = loader.construct().unwrap();
         assert_eq!("hello", config.hello_key);
         assert_eq!("hello world", config.all);
     }
@@ -371,13 +366,14 @@ mod tests {
         temp_env::with_var("YAAC_VALUE", Some("value here"), || {
             let dir = tempdir().unwrap();
             let file_path = dir.path().join("application.toml");
-            let mut tmp_file = File::create(file_path).unwrap();
+            let mut tmp_file = File::create(&file_path).unwrap();
             writeln!(tmp_file, "value = \"more ${{YAAC_VALUE}}\"").unwrap();
 
-            let buf = dir.path().join("application").to_str().unwrap().to_string();
-            let config_loader = ConfigLoader::new(buf, "APP");
-            let config: Config = config_loader.construct().unwrap();
+            let mut loader = ConfigLoader::new();
+            loader.add_source(FileSource::new(file_path));
+            loader.add_source(EnvironmentSource::new("APP"));
 
+            let config: Config = loader.construct().unwrap();
             assert_eq!("more value here", config.value);
         });
     }
