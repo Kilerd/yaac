@@ -1,4 +1,5 @@
 use std::cmp::{max};
+use std::collections::HashMap;
 use std::fmt::{Display, format, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -43,14 +44,37 @@ impl ConfigLoader {
         }
 
         // resolve placeholder
-        resolve_placeholder(&mut result);
+
+        resolve_environment_placeholder(&mut result);
+        let mut collectors = HashMap::new();
+        collect_path_placeholder(&result, &result, &mut collectors);
+        resolve_path_placeholder(&mut result, &collectors);
+        dbg!(&collectors);
         Ok(result.try_into()?)
     }
 }
 
 
-fn resolve_placeholder(value: &mut Value) {
+fn get_value_by_path_inner<'b, 'a: 'b, >(value: &'a Value, paths: &'b [&'b str]) -> Option<&'a Value> {
+    match paths.len() {
+        0 => unreachable!(),
+        1 => value.as_table().and_then(|table| table.get(paths[0])),
+        _ => {
+            let option = value.as_table().and_then(|table| table.get(paths[0]));
+            option.and_then(|tier| get_value_by_path_inner(tier, &paths[1..]))
+        }
+    }
+}
+
+fn get_value_by_path<'b, 'a: 'b, >(value: &'a Value, path: &'b str) -> Option<&'a Value> {
+    let paths = path.split('.').collect_vec();
+    get_value_by_path_inner(value, &paths[..])
+}
+
+fn resolve_environment_placeholder(value: &mut Value) {
     let environment_pattern = Regex::new("\\$\\{(?<env>[A-Z]+(_[A-Z]+)*)\\}").unwrap();
+    let path_pattern = Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
+
     match value {
         Value::String(ref mut inner) => {
             let ret = environment_pattern.replace_all(&inner, |caps: &Captures| {
@@ -61,12 +85,61 @@ fn resolve_placeholder(value: &mut Value) {
         }
         Value::Array(inner) => {
             for element in inner {
-                resolve_placeholder(element);
+                resolve_environment_placeholder(element);
             }
         }
         Value::Table(table) => {
             for (key, value) in table.iter_mut() {
-                resolve_placeholder(value);
+                resolve_environment_placeholder(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn resolve_path_placeholder(value: &mut Value, collectors: &HashMap<String, String>) {
+    let path_pattern = Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
+
+    match value {
+        Value::String(ref mut inner) => {
+            let ret = path_pattern.replace_all(&inner, |caps: &Captures| {
+                let path: &str = &caps["path"];
+                collectors.get(path).cloned().unwrap_or("".to_string())
+            });
+            *inner = ret.to_string();
+        }
+        Value::Array(inner) => {
+            for element in inner {
+                resolve_path_placeholder(element, collectors);
+            }
+        }
+        Value::Table(table) => {
+            for (key, value) in table.iter_mut() {
+                resolve_path_placeholder(value, collectors);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_path_placeholder(root: &Value, value: &Value, collectors: &mut HashMap<String, String>) {
+    let path_pattern = Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
+
+    match value {
+        Value::String(inner) => {
+            for caps in path_pattern.captures_iter(&inner) {
+                let path: &str = &caps["path"];
+                collectors.insert(path.to_string(), get_value_by_path(root, path).and_then(|it| it.as_str()).map(|it| it.to_string()).unwrap_or("".to_string()));
+            }
+        }
+        Value::Array(inner) => {
+            for element in inner {
+                collect_path_placeholder(root, element, collectors);
+            }
+        }
+        Value::Table(table) => {
+            for (_, value) in table.iter() {
+                collect_path_placeholder(root, value, collectors);
             }
         }
         _ => {}
@@ -253,20 +326,20 @@ mod tests {
     fn should_resolve_placeholder() {
         #[derive(Debug, Deserialize)]
         struct Config {
-            hello: String,
+            hello_key: String,
             all: String,
         }
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("application.toml");
         let mut tmp_file = File::create(file_path).unwrap();
-        writeln!(tmp_file, "hello = \"hello\" \nall=\"${{hello}} world\"").unwrap();
+        writeln!(tmp_file, "hello_key = \"hello\" \nall=\"${{hello_key}} world\"").unwrap();
 
         let buf = dir.path().join("application").to_str().unwrap().to_string();
         let config_loader = ConfigLoader::new(buf, "APP");
         let config: Config = config_loader.construct().unwrap();
 
-        assert_eq!("hello", config.hello);
+        assert_eq!("hello", config.hello_key);
         assert_eq!("hello world", config.all);
     }
 
