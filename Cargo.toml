@@ -2,6 +2,9 @@
 name = "yaac"
 version = "0.1.0-alpha.1"
 edition = "2021"
+description = "yet another another config lib for web application"
+license = "MIT"
+homepage = "https://github.com/Kilerd/yaac"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
