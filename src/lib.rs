@@ -178,6 +178,47 @@ mod tests {
             assert_eq!("value here", config.value);
         });
     }
+    #[test]
+    fn should_load_config_from_given_environment_with_prefix() {
+        #[derive(Debug, Deserialize)]
+        struct Config {
+            value: String,
+        }
+
+        temp_env::with_var("YAAC_VALUE", Some("value here"), || {
+            let dir = tempdir().unwrap();
+            let file_path = dir.path().join("application.toml");
+            let mut tmp_file = File::create(file_path).unwrap();
+            writeln!(tmp_file, "a = 123").unwrap();
+
+            let buf = dir.path().join("application").to_str().unwrap().to_string();
+            let config_loader = ConfigLoader::new(buf, "YAAC");
+            let config: Config = config_loader.construct().unwrap();
+
+            assert_eq!("value here", config.value);
+        });
+    }
+    #[test]
+    fn should_override_config_from_given_environment() {
+        #[derive(Debug, Deserialize)]
+        struct Config {
+            value: String,
+        }
+
+        temp_env::with_var("YAAC_VALUE", Some("value here"), || {
+            let dir = tempdir().unwrap();
+            let file_path = dir.path().join("application.toml");
+            let mut tmp_file = File::create(file_path).unwrap();
+            writeln!(tmp_file, "value = \"original\"").unwrap();
+
+            let buf = dir.path().join("application").to_str().unwrap().to_string();
+            let config_loader = ConfigLoader::new(buf, "YAAC");
+            let config: Config = config_loader.construct().unwrap();
+
+            assert_eq!("value here", config.value);
+        });
+    }
+
 
     #[test]
     fn should_load_config_from_hierarchy_files() {}
