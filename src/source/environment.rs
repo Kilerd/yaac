@@ -1,9 +1,8 @@
-use std::error::Error;
-use itertools::Itertools;
-use toml::{Value, Table};
 use crate::merge_two_value;
 use crate::source::Source;
 use crate::utils::build_toml_value;
+use std::error::Error;
+use toml::{Table, Value};
 
 pub struct EnvironmentSource {
     prefix: String,
@@ -11,10 +10,11 @@ pub struct EnvironmentSource {
 
 impl EnvironmentSource {
     pub fn new(prefix: impl Into<String>) -> Self {
-        Self { prefix: prefix.into() }
+        Self {
+            prefix: prefix.into(),
+        }
     }
 }
-
 
 impl Source for EnvironmentSource {
     fn load(&self) -> Result<Value, Box<dyn Error>> {

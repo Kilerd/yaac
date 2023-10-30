@@ -1,7 +1,7 @@
+use crate::source::Source;
 use std::error::Error;
 use std::path::PathBuf;
 use toml::Value;
-use crate::source::Source;
 
 pub struct FileSource {
     path: PathBuf,
@@ -12,7 +12,6 @@ impl FileSource {
         Self { path }
     }
 }
-
 
 impl Source for FileSource {
     fn load(&self) -> Result<Value, Box<dyn Error>> {

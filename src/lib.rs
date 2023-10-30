@@ -1,38 +1,34 @@
-use itertools::{EitherOrBoth, Itertools};
-use regex::{Captures, Regex};
+use crate::utils::merge_two_value;
 use serde::Deserialize;
-use std::cmp::max;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
-use std::str::FromStr;
 use toml::{Table, Value};
-use crate::post_processor::{EnvironmentPostProcessor, PathVariablePostProcessor, PostProcessor};
-use crate::source::Source;
-use crate::utils::{build_toml_value, merge_two_value};
 
-
-mod source;
 mod post_processor;
+mod source;
 
 pub mod utils;
 
+pub use crate::post_processor::{
+    EnvironmentPostProcessor, PathVariablePostProcessor, PostProcessor,
+};
+pub use crate::source::{environment::EnvironmentSource, file_based::FileSource, Source};
+
+#[derive(Default)]
 pub struct ConfigLoader {
     sources: Vec<Box<dyn Source + Send + Sync>>,
-    post_processors: Vec<Box<dyn PostProcessor + Send + Sync>>
+    post_processors: Vec<Box<dyn PostProcessor + Send + Sync>>,
 }
 
 impl ConfigLoader {
     pub fn new() -> Self {
-        ConfigLoader {
-            sources: vec![],
-            post_processors: vec![],
-        }
+        ConfigLoader::default()
     }
-    pub fn add_source<T: Source  + Send + Sync + 'static>(&mut self, source: T) {
+    pub fn add_source<T: Source + Send + Sync + 'static>(&mut self, source: T) {
         self.sources.push(Box::new(source))
     }
-    pub fn add_post_processor<T: PostProcessor  + Send + Sync + 'static>(&mut self, post_processor: T) {
+    pub fn add_post_processor<T: PostProcessor + Send + Sync + 'static>(
+        &mut self,
+        post_processor: T,
+    ) {
         self.post_processors.push(Box::new(post_processor))
     }
 
@@ -44,7 +40,6 @@ impl ConfigLoader {
     }
 
     pub fn construct<'de, T: Deserialize<'de>>(self) -> Result<T, Box<dyn std::error::Error>> {
-
         let mut source_ret = vec![];
         for source in self.sources {
             let value1 = source.load()?;
@@ -66,8 +61,6 @@ impl ConfigLoader {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use serde::Deserialize;
@@ -75,9 +68,9 @@ mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
-    use crate::ConfigLoader;
     use crate::source::environment::EnvironmentSource;
     use crate::source::file_based::FileSource;
+    use crate::ConfigLoader;
 
     #[test]
     fn should_load_config_from_toml_file() {
@@ -110,7 +103,6 @@ mod tests {
             let file_path = dir.path().join("application.toml");
             let mut tmp_file = File::create(&file_path).unwrap();
             writeln!(tmp_file, "a = 123").unwrap();
-
 
             let mut loader = ConfigLoader::new();
             loader.add_source(FileSource::new(file_path));
@@ -183,7 +175,6 @@ mod tests {
             "hello_key = \"hello\" \nall=\"${{hello_key}} world\""
         )
         .unwrap();
-
 
         let mut loader = ConfigLoader::new();
         loader.add_source(FileSource::new(file_path));

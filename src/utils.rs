@@ -1,7 +1,7 @@
-use std::fmt::{Display, Formatter};
 use itertools::{EitherOrBoth, Itertools};
-use toml::{Value,Table};
 use std::cmp::max;
+use std::fmt::{Display, Formatter};
+use toml::{Table, Value};
 
 #[derive(Debug, PartialEq)]
 pub struct Error {
@@ -47,8 +47,6 @@ pub fn build_toml_value(key: String, value: String) -> toml::Value {
         Value::Table(map)
     })
 }
-
-
 
 fn merge_into_table_inner(value: &mut Table, other: Table, path: &str) -> Result<(), Error> {
     for (name, inner) in other {
