@@ -1,11 +1,10 @@
 use std::cmp::{max};
 use std::collections::HashMap;
-use std::fmt::{Display, format, Formatter};
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
-use itertools::{EitherOrBoth, Itertools, Position};
+use itertools::{EitherOrBoth, Itertools};
 use regex::{Captures, Regex};
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use toml::{Table, Value};
 
@@ -32,9 +31,9 @@ impl ConfigLoader {
 
         // load from env
         let prefix = format!("{}_", &self.environment_prefix);
-        let environments: Vec<toml::Value> = std::env::vars().into_iter().filter(|(key, value)| key.starts_with(&prefix))
+        let environments: Vec<Value> = std::env::vars().filter(|(key, _)| key.starts_with(&prefix))
             .map(|(key, value)| (key.strip_prefix(&prefix).unwrap_or(&key).to_owned(), value))
-            .filter(|(key, value)| !key.is_empty())
+            .filter(|(key, _)| !key.is_empty())
             .map(|(key, value)| build_toml_value(key.to_lowercase(), value))
             .collect();
 
@@ -44,7 +43,6 @@ impl ConfigLoader {
         }
 
         // resolve placeholder
-
         resolve_environment_placeholder(&mut result);
         let mut collectors = HashMap::new();
         collect_path_placeholder(&result, &result, &mut collectors);
@@ -73,11 +71,10 @@ fn get_value_by_path<'b, 'a: 'b, >(value: &'a Value, path: &'b str) -> Option<&'
 
 fn resolve_environment_placeholder(value: &mut Value) {
     let environment_pattern = Regex::new("\\$\\{(?<env>[A-Z]+(_[A-Z]+)*)\\}").unwrap();
-    let path_pattern = Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
 
     match value {
         Value::String(ref mut inner) => {
-            let ret = environment_pattern.replace_all(&inner, |caps: &Captures| {
+            let ret = environment_pattern.replace_all(inner, |caps: &Captures| {
                 let env_variable: &str = &caps["env"];
                 std::env::var(env_variable).unwrap_or("".to_owned())
             });
@@ -89,7 +86,7 @@ fn resolve_environment_placeholder(value: &mut Value) {
             }
         }
         Value::Table(table) => {
-            for (key, value) in table.iter_mut() {
+            for (_, value) in table.iter_mut() {
                 resolve_environment_placeholder(value);
             }
         }
@@ -102,7 +99,7 @@ fn resolve_path_placeholder(value: &mut Value, collectors: &HashMap<String, Stri
 
     match value {
         Value::String(ref mut inner) => {
-            let ret = path_pattern.replace_all(&inner, |caps: &Captures| {
+            let ret = path_pattern.replace_all(inner, |caps: &Captures| {
                 let path: &str = &caps["path"];
                 collectors.get(path).cloned().unwrap_or("".to_string())
             });
@@ -114,7 +111,7 @@ fn resolve_path_placeholder(value: &mut Value, collectors: &HashMap<String, Stri
             }
         }
         Value::Table(table) => {
-            for (key, value) in table.iter_mut() {
+            for (_, value) in table.iter_mut() {
                 resolve_path_placeholder(value, collectors);
             }
         }
@@ -127,7 +124,7 @@ fn collect_path_placeholder(root: &Value, value: &Value, collectors: &mut HashMa
 
     match value {
         Value::String(inner) => {
-            for caps in path_pattern.captures_iter(&inner) {
+            for caps in path_pattern.captures_iter(inner) {
                 let path: &str = &caps["path"];
                 collectors.insert(path.to_string(), get_value_by_path(root, path).and_then(|it| it.as_str()).map(|it| it.to_string()).unwrap_or("".to_string()));
             }
@@ -147,7 +144,7 @@ fn collect_path_placeholder(root: &Value, value: &Value, collectors: &mut HashMa
 }
 
 fn build_toml_value(key: String, value: String) -> toml::Value {
-    let split = key.split("_").into_iter().collect_vec();
+    let split = key.split('_').collect_vec();
 
     let mut rev = split.into_iter().rev();
     let first = rev.next().unwrap();
@@ -155,12 +152,11 @@ fn build_toml_value(key: String, value: String) -> toml::Value {
     let mut accr = Table::new();
     accr.insert(first.to_owned(), value1);
     let accr = Value::Table(accr);
-    let ret = rev.fold(accr, |accr, text| {
+    rev.fold(accr, |accr, text| {
         let mut map = Table::new();
         map.insert(text.to_owned(), accr);
         Value::Table(map)
-    });
-    ret
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -236,7 +232,7 @@ fn merge_two_value(base: Value, append: Value, path: &str) -> Result<Value, Erro
 mod tests {
     use std::fs::File;
     use tempfile::tempdir;
-    use std::io::{self, Write};
+    use std::io::{Write};
     use serde::Deserialize;
 
     use crate::ConfigLoader;
