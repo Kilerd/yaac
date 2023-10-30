@@ -1,11 +1,11 @@
-use std::cmp::{max};
+use itertools::{EitherOrBoth, Itertools};
+use regex::{Captures, Regex};
+use serde::Deserialize;
+use std::cmp::max;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
-use itertools::{EitherOrBoth, Itertools};
-use regex::{Captures, Regex};
-use serde::Deserialize;
 use toml::{Table, Value};
 
 pub struct ConfigLoader {
@@ -24,14 +24,17 @@ impl ConfigLoader {
     pub fn construct<'de, T: Deserialize<'de>>(self) -> Result<T, Box<dyn std::error::Error>> {
         // load from file
         let profile: Option<String> = None;
-        let profile_string = profile.map(|it| format!("_{}", it)).unwrap_or("".to_string());
+        let profile_string = profile
+            .map(|it| format!("_{}", it))
+            .unwrap_or("".to_string());
         let buf = PathBuf::from_str(&format!("{}{}.toml", &self.file_base_name, profile_string))?;
         let file_content = std::fs::read_to_string(buf)?;
         let mut result: toml::Value = toml::from_str(&file_content)?;
 
         // load from env
         let prefix = format!("{}_", &self.environment_prefix);
-        let environments: Vec<Value> = std::env::vars().filter(|(key, _)| key.starts_with(&prefix))
+        let environments: Vec<Value> = std::env::vars()
+            .filter(|(key, _)| key.starts_with(&prefix))
             .map(|(key, value)| (key.strip_prefix(&prefix).unwrap_or(&key).to_owned(), value))
             .filter(|(key, _)| !key.is_empty())
             .map(|(key, value)| build_toml_value(key.to_lowercase(), value))
@@ -52,8 +55,10 @@ impl ConfigLoader {
     }
 }
 
-
-fn get_value_by_path_inner<'b, 'a: 'b, >(value: &'a Value, paths: &'b [&'b str]) -> Option<&'a Value> {
+fn get_value_by_path_inner<'b, 'a: 'b>(
+    value: &'a Value,
+    paths: &'b [&'b str],
+) -> Option<&'a Value> {
     match paths.len() {
         0 => unreachable!(),
         1 => value.as_table().and_then(|table| table.get(paths[0])),
@@ -64,7 +69,7 @@ fn get_value_by_path_inner<'b, 'a: 'b, >(value: &'a Value, paths: &'b [&'b str])
     }
 }
 
-fn get_value_by_path<'b, 'a: 'b, >(value: &'a Value, path: &'b str) -> Option<&'a Value> {
+fn get_value_by_path<'b, 'a: 'b>(value: &'a Value, path: &'b str) -> Option<&'a Value> {
     let paths = path.split('.').collect_vec();
     get_value_by_path_inner(value, &paths[..])
 }
@@ -95,7 +100,8 @@ fn resolve_environment_placeholder(value: &mut Value) {
 }
 
 fn resolve_path_placeholder(value: &mut Value, collectors: &HashMap<String, String>) {
-    let path_pattern = Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
+    let path_pattern =
+        Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
 
     match value {
         Value::String(ref mut inner) => {
@@ -120,13 +126,20 @@ fn resolve_path_placeholder(value: &mut Value, collectors: &HashMap<String, Stri
 }
 
 fn collect_path_placeholder(root: &Value, value: &Value, collectors: &mut HashMap<String, String>) {
-    let path_pattern = Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
+    let path_pattern =
+        Regex::new("\\$\\{(?<path>[a-z]+(_[a-z]+)*(\\.[a-z]+(_[a-z]+)*)*)\\}").unwrap();
 
     match value {
         Value::String(inner) => {
             for caps in path_pattern.captures_iter(inner) {
                 let path: &str = &caps["path"];
-                collectors.insert(path.to_string(), get_value_by_path(root, path).and_then(|it| it.as_str()).map(|it| it.to_string()).unwrap_or("".to_string()));
+                collectors.insert(
+                    path.to_string(),
+                    get_value_by_path(root, path)
+                        .and_then(|it| it.as_str())
+                        .map(|it| it.to_string())
+                        .unwrap_or("".to_string()),
+                );
             }
         }
         Value::Array(inner) => {
@@ -178,18 +191,17 @@ impl Error {
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "merge fail, path={}, existed type={} appended type={}", self.path, self.existed_type, self.appended_type)
+        write!(
+            f,
+            "merge fail, path={}, existed type={} appended type={}",
+            self.path, self.existed_type, self.appended_type
+        )
     }
 }
 
 impl std::error::Error for Error {}
 
-
-fn merge_into_table_inner(
-    value: &mut Table,
-    other: Table,
-    path: &str,
-) -> Result<(), Error> {
+fn merge_into_table_inner(value: &mut Table, other: Table, path: &str) -> Result<(), Error> {
     for (name, inner) in other {
         if let Some(existing) = value.remove(&name) {
             let inner_path = format!("{path}.{name}");
@@ -210,9 +222,15 @@ fn merge_two_value(base: Value, append: Value, path: &str) -> Result<Value, Erro
         (Value::Datetime(_), Value::Datetime(inner)) => Ok(Value::Datetime(inner)),
         (Value::Array(existing), Value::Array(inner)) => {
             let mut ret = Vec::with_capacity(max(existing.len(), inner.len()));
-            for pair in existing.into_iter().enumerate().zip_longest(inner.into_iter().enumerate()) {
+            for pair in existing
+                .into_iter()
+                .enumerate()
+                .zip_longest(inner.into_iter().enumerate())
+            {
                 let element = match pair {
-                    EitherOrBoth::Both(l, r) => merge_two_value(l.1, r.1, &format!("{}.[{}]", path, l.0))?,
+                    EitherOrBoth::Both(l, r) => {
+                        merge_two_value(l.1, r.1, &format!("{}.[{}]", path, l.0))?
+                    }
                     EitherOrBoth::Left(l) => l.1,
                     EitherOrBoth::Right(r) => r.1,
                 };
@@ -230,10 +248,10 @@ fn merge_two_value(base: Value, append: Value, path: &str) -> Result<Value, Erro
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
-    use tempfile::tempdir;
-    use std::io::{Write};
     use serde::Deserialize;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
 
     use crate::ConfigLoader;
 
@@ -329,7 +347,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("application.toml");
         let mut tmp_file = File::create(file_path).unwrap();
-        writeln!(tmp_file, "hello_key = \"hello\" \nall=\"${{hello_key}} world\"").unwrap();
+        writeln!(
+            tmp_file,
+            "hello_key = \"hello\" \nall=\"${{hello_key}} world\""
+        )
+        .unwrap();
 
         let buf = dir.path().join("application").to_str().unwrap().to_string();
         let config_loader = ConfigLoader::new(buf, "APP");
