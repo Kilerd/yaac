@@ -3,6 +3,7 @@ use std::fmt::{Display, format, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
 use itertools::{EitherOrBoth, Itertools, Position};
+use regex::{Captures, Regex};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use toml::{Table, Value};
@@ -41,7 +42,38 @@ impl ConfigLoader {
             result = merge_two_value(result, environment_value, "$")?;
         }
 
+
+        // resolve placeholder
+        resolve_placeholder(&mut result);
         Ok(result.try_into()?)
+    }
+}
+
+
+fn resolve_placeholder(value: &mut Value) {
+    let environment_pattern = Regex::new("\\$\\{(?<env>[A-Z]+(_[A-Z]+)*)\\}").unwrap();
+    match value {
+        Value::String(ref mut inner) => {
+            let ret = environment_pattern.replace(&inner, |caps: &Captures| {
+                let env_varaiable: &str = &caps["env"];
+                std::env::var(env_varaiable).unwrap_or("".to_owned())
+            });
+            *inner = ret.to_string();
+        }
+        Value::Integer(_) => {}
+        Value::Float(_) => {}
+        Value::Boolean(_) => {}
+        Value::Datetime(_) => {}
+        Value::Array(inner) => {
+            for element in inner {
+                resolve_placeholder(element);
+            }
+        }
+        Value::Table(table) => {
+            for (key, value) in table.iter_mut() {
+                resolve_placeholder(value);
+            }
+        }
     }
 }
 
@@ -68,6 +100,7 @@ pub struct Error {
     pub existed_type: &'static str,
     pub appended_type: &'static str,
 }
+
 impl Error {
     pub fn new(path: String, existed_type: &'static str, appended_type: &'static str) -> Self {
         Self {
@@ -84,9 +117,7 @@ impl Display for Error {
     }
 }
 
-impl std::error::Error for Error {
-
-}
+impl std::error::Error for Error {}
 
 
 fn merge_into_table_inner(
@@ -104,8 +135,9 @@ fn merge_into_table_inner(
     }
     Ok(())
 }
+
 fn merge_two_value(base: Value, append: Value, path: &str) -> Result<Value, Error> {
-    match(base, append) {
+    match (base, append) {
         (Value::String(_), Value::String(inner)) => Ok(Value::String(inner)),
         (Value::Integer(_), Value::Integer(inner)) => Ok(Value::Integer(inner)),
         (Value::Float(_), Value::Float(inner)) => Ok(Value::Float(inner)),
@@ -114,7 +146,7 @@ fn merge_two_value(base: Value, append: Value, path: &str) -> Result<Value, Erro
         (Value::Array(existing), Value::Array(inner)) => {
             let mut ret = Vec::with_capacity(max(existing.len(), inner.len()));
             for pair in existing.into_iter().enumerate().zip_longest(inner.into_iter().enumerate()) {
-               let element =  match pair {
+                let element = match pair {
                     EitherOrBoth::Both(l, r) => merge_two_value(l.1, r.1, &format!("{}.[{}]", path, l.0))?,
                     EitherOrBoth::Left(l) => l.1,
                     EitherOrBoth::Right(r) => r.1,
@@ -178,6 +210,7 @@ mod tests {
             assert_eq!("value here", config.value);
         });
     }
+
     #[test]
     fn should_load_config_from_given_environment_with_prefix() {
         #[derive(Debug, Deserialize)]
@@ -198,6 +231,7 @@ mod tests {
             assert_eq!("value here", config.value);
         });
     }
+
     #[test]
     fn should_override_config_from_given_environment() {
         #[derive(Debug, Deserialize)]
@@ -219,6 +253,47 @@ mod tests {
         });
     }
 
+    #[test]
+    fn should_resolve_placeholder() {
+        #[derive(Debug, Deserialize)]
+        struct Config {
+            hello: String,
+            all: String,
+        }
+
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("application.toml");
+        let mut tmp_file = File::create(file_path).unwrap();
+        writeln!(tmp_file, "hello = \"hello\" \nall=\"${{hello}} world\"").unwrap();
+
+        let buf = dir.path().join("application").to_str().unwrap().to_string();
+        let config_loader = ConfigLoader::new(buf, "APP");
+        let config: Config = config_loader.construct().unwrap();
+
+        assert_eq!("hello", config.hello);
+        assert_eq!("hello world", config.all);
+    }
+
+    #[test]
+    fn should_resolve_environment_placeholder() {
+        #[derive(Debug, Deserialize)]
+        struct Config {
+            value: String,
+        }
+
+        temp_env::with_var("YAAC_VALUE", Some("value here"), || {
+            let dir = tempdir().unwrap();
+            let file_path = dir.path().join("application.toml");
+            let mut tmp_file = File::create(file_path).unwrap();
+            writeln!(tmp_file, "value = \"more ${{YAAC_VALUE}}\"").unwrap();
+
+            let buf = dir.path().join("application").to_str().unwrap().to_string();
+            let config_loader = ConfigLoader::new(buf, "APP");
+            let config: Config = config_loader.construct().unwrap();
+
+            assert_eq!("more value here", config.value);
+        });
+    }
 
     #[test]
     fn should_load_config_from_hierarchy_files() {}
