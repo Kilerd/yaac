@@ -42,7 +42,6 @@ impl ConfigLoader {
             result = merge_two_value(result, environment_value, "$")?;
         }
 
-
         // resolve placeholder
         resolve_placeholder(&mut result);
         Ok(result.try_into()?)
@@ -54,16 +53,12 @@ fn resolve_placeholder(value: &mut Value) {
     let environment_pattern = Regex::new("\\$\\{(?<env>[A-Z]+(_[A-Z]+)*)\\}").unwrap();
     match value {
         Value::String(ref mut inner) => {
-            let ret = environment_pattern.replace(&inner, |caps: &Captures| {
-                let env_varaiable: &str = &caps["env"];
-                std::env::var(env_varaiable).unwrap_or("".to_owned())
+            let ret = environment_pattern.replace_all(&inner, |caps: &Captures| {
+                let env_variable: &str = &caps["env"];
+                std::env::var(env_variable).unwrap_or("".to_owned())
             });
             *inner = ret.to_string();
         }
-        Value::Integer(_) => {}
-        Value::Float(_) => {}
-        Value::Boolean(_) => {}
-        Value::Datetime(_) => {}
         Value::Array(inner) => {
             for element in inner {
                 resolve_placeholder(element);
@@ -74,6 +69,7 @@ fn resolve_placeholder(value: &mut Value) {
                 resolve_placeholder(value);
             }
         }
+        _ => {}
     }
 }
 
