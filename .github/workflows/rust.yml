@@ -21,10 +21,6 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
 
-    - name: cargo-auto-publish
-      # You may pin to the exact commit or the version.
-      # uses: seunlanlege/cargo-auto-publish@12dfb09b683d500a97e239c169d033c8a5809321
-      uses: seunlanlege/cargo-auto-publish@2
+    - uses: katyo/publish-crates@v2
       with:
-        # space de-limited paths to Cargo.toml files of crates you want to auto-publish
-        toml: Cargo.toml # optional
+        registry-token: ${{ secrets.CARGO_TOKEN }}
