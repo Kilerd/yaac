@@ -80,6 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
       - uses: katyo/publish-crates@v2
         with:
           registry-token: ${{ secrets.CARGO_TOKEN }}
