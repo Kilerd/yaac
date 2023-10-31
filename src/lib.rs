@@ -53,8 +53,15 @@ impl ConfigLoader {
             result = merge_two_value(result, environment_value, "$")?;
         }
 
-        for post_processor in self.processors {
-            post_processor.process(&mut result)?;
+        loop {
+            let mut is_modify = false;
+            for post_processor in self.processors.iter() {
+                is_modify = is_modify || post_processor.process(&mut result)?;
+            }
+
+            if is_modify == false {
+                break;
+            }
         }
 
         Ok(result.try_into()?)
@@ -206,6 +213,31 @@ mod tests {
 
             let config: Config = loader.construct().unwrap();
             assert_eq!("more value here", config.value);
+        });
+    }
+
+    #[test]
+    fn should_resolve_processor_recursively() {
+        #[derive(Debug, Deserialize)]
+        struct Config {
+            original: String,
+            value: String,
+        }
+
+        temp_env::with_var("YAAC_VALUE", Some("${original}"), || {
+            let dir = tempdir().unwrap();
+            let file_path = dir.path().join("application.toml");
+            let mut tmp_file = File::create(&file_path).unwrap();
+            writeln!(tmp_file, "original=\"123\"\nvalue = \"more ${{YAAC_VALUE}}\"").unwrap();
+
+            let mut loader = ConfigLoader::new();
+            loader.add_source(FileSource::new(file_path));
+            loader.add_source(EnvironmentSource::new("APP"));
+            loader.enable_environment_variable_processor();
+            loader.enable_path_variable_processor();
+
+            let config: Config = loader.construct().unwrap();
+            assert_eq!("more 123", config.value);
         });
     }
 

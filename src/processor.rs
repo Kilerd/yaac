@@ -5,14 +5,18 @@ use std::error::Error;
 use toml::Value;
 
 pub trait Processor {
-    fn process(&self, value: &mut Value) -> Result<(), Box<dyn std::error::Error>>;
+    /// transform value.
+    /// return true if the processor do modify the value
+    fn process(&self, value: &mut Value) -> Result<bool, Box<dyn std::error::Error>>;
 }
 
 pub struct EnvironmentVariableProcessor;
 
 impl Processor for EnvironmentVariableProcessor {
-    fn process(&self, value: &mut Value) -> Result<(), Box<dyn Error>> {
-        fn resolve_environment_placeholder(value: &mut Value) {
+    fn process(&self, value: &mut Value) -> Result<bool, Box<dyn Error>> {
+        fn resolve_environment_placeholder(value: &mut Value) -> bool {
+            let mut is_modify = false;
+
             let environment_pattern = Regex::new("\\$\\{(?<env>[A-Z]+(_[A-Z]+)*)\\}").unwrap();
 
             match value {
@@ -21,35 +25,40 @@ impl Processor for EnvironmentVariableProcessor {
                         let env_variable: &str = &caps["env"];
                         std::env::var(env_variable).unwrap_or("".to_owned())
                     });
-                    *inner = ret.to_string();
+
+                    if ret.as_ref().ne(inner.as_str()) {
+                        *inner = ret.to_string();
+                        is_modify = true;
+                    }
                 }
                 Value::Array(inner) => {
                     for element in inner {
-                        resolve_environment_placeholder(element);
+                        is_modify = is_modify || resolve_environment_placeholder(element);
                     }
                 }
                 Value::Table(table) => {
                     for (_, value) in table.iter_mut() {
-                        resolve_environment_placeholder(value);
+                        is_modify = is_modify || resolve_environment_placeholder(value);
                     }
                 }
                 _ => {}
             }
+            is_modify
         }
 
-        resolve_environment_placeholder(value);
-        Ok(())
+        Ok(resolve_environment_placeholder(value))
     }
 }
 
 pub struct PathVariableProcessor;
 
 impl Processor for PathVariableProcessor {
-    fn process(&self, value: &mut Value) -> Result<(), Box<dyn Error>> {
+    fn process(&self, value: &mut Value) -> Result<bool, Box<dyn Error>> {
         let mut collectors = HashMap::new();
         collect_path_placeholder(value, value, &mut collectors);
         resolve_path_placeholder(value, &collectors);
-        Ok(())
+
+        Ok(!collectors.is_empty())
     }
 }
 
