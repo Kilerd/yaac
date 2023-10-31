@@ -5,7 +5,7 @@ edition = "2021"
 description = "yet another another config lib for web application"
 license = "MIT"
 homepage = "https://github.com/Kilerd/yaac"
-
+readme = "readme.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -16,6 +16,6 @@ toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
-serde={version="1", features = ["derive"]}
+serde = { version = "1", features = ["derive"] }
 temp-env = "0.3.6"
 
