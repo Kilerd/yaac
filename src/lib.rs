@@ -2,20 +2,20 @@ use crate::utils::merge_two_value;
 use serde::Deserialize;
 use toml::{Table, Value};
 
-mod post_processor;
+mod processor;
 mod source;
 
 pub mod utils;
 
-pub use crate::post_processor::{
-    EnvironmentPostProcessor, PathVariablePostProcessor, PostProcessor,
+pub use crate::processor::{
+    EnvironmentVariableProcessor, PathVariableProcessor, Processor,
 };
 pub use crate::source::{environment::EnvironmentSource, file_based::FileSource, Source};
 
 #[derive(Default)]
 pub struct ConfigLoader {
     sources: Vec<Box<dyn Source + Send + Sync>>,
-    post_processors: Vec<Box<dyn PostProcessor + Send + Sync>>,
+    processors: Vec<Box<dyn Processor + Send + Sync>>,
 }
 
 impl ConfigLoader {
@@ -25,18 +25,18 @@ impl ConfigLoader {
     pub fn add_source<T: Source + Send + Sync + 'static>(&mut self, source: T) {
         self.sources.push(Box::new(source))
     }
-    pub fn add_post_processor<T: PostProcessor + Send + Sync + 'static>(
+    pub fn add_processor<T: Processor + Send + Sync + 'static>(
         &mut self,
         post_processor: T,
     ) {
-        self.post_processors.push(Box::new(post_processor))
+        self.processors.push(Box::new(post_processor))
     }
 
-    pub fn enable_environment_post_processor(&mut self) {
-        self.add_post_processor(EnvironmentPostProcessor);
+    pub fn enable_environment_variable_processor(&mut self) {
+        self.add_processor(EnvironmentVariableProcessor);
     }
-    pub fn enable_path_variable_post_processor(&mut self) {
-        self.add_post_processor(PathVariablePostProcessor);
+    pub fn enable_path_variable_processor(&mut self) {
+        self.add_processor(PathVariableProcessor);
     }
 
     pub fn construct<'de, T: Deserialize<'de>>(self) -> Result<T, Box<dyn std::error::Error>> {
@@ -53,7 +53,7 @@ impl ConfigLoader {
             result = merge_two_value(result, environment_value, "$")?;
         }
 
-        for post_processor in self.post_processors {
+        for post_processor in self.processors {
             post_processor.process(&mut result)?;
         }
 
@@ -179,7 +179,7 @@ mod tests {
         let mut loader = ConfigLoader::new();
         loader.add_source(FileSource::new(file_path));
         loader.add_source(EnvironmentSource::new("APP"));
-        loader.enable_path_variable_post_processor();
+        loader.enable_path_variable_processor();
 
         let config: Config = loader.construct().unwrap();
         assert_eq!("hello", config.hello_key);
@@ -202,7 +202,7 @@ mod tests {
             let mut loader = ConfigLoader::new();
             loader.add_source(FileSource::new(file_path));
             loader.add_source(EnvironmentSource::new("APP"));
-            loader.enable_environment_post_processor();
+            loader.enable_environment_variable_processor();
 
             let config: Config = loader.construct().unwrap();
             assert_eq!("more value here", config.value);

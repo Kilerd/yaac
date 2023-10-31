@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::error::Error;
 use toml::Value;
 
-pub trait PostProcessor {
+pub trait Processor {
     fn process(&self, value: &mut Value) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-pub struct EnvironmentPostProcessor;
+pub struct EnvironmentVariableProcessor;
 
-impl PostProcessor for EnvironmentPostProcessor {
+impl Processor for EnvironmentVariableProcessor {
     fn process(&self, value: &mut Value) -> Result<(), Box<dyn Error>> {
         fn resolve_environment_placeholder(value: &mut Value) {
             let environment_pattern = Regex::new("\\$\\{(?<env>[A-Z]+(_[A-Z]+)*)\\}").unwrap();
@@ -42,9 +42,9 @@ impl PostProcessor for EnvironmentPostProcessor {
     }
 }
 
-pub struct PathVariablePostProcessor;
+pub struct PathVariableProcessor;
 
-impl PostProcessor for PathVariablePostProcessor {
+impl Processor for PathVariableProcessor {
     fn process(&self, value: &mut Value) -> Result<(), Box<dyn Error>> {
         let mut collectors = HashMap::new();
         collect_path_placeholder(value, value, &mut collectors);
